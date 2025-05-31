@@ -86,7 +86,22 @@ class NetflixVideoPlayer {
         this.videoPlayer.addEventListener('ended', () => this.onVideoEnded());
         this.videoPlayer.addEventListener('waiting', () => this.showLoading());
         this.videoPlayer.addEventListener('canplay', () => this.hideLoading());
-        this.videoPlayer.addEventListener('click', () => this.togglePlayPause());
+        this.videoPlayer.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.togglePlayPause();
+        });
+        
+        // Bloquear eventos nativos que causan expansión
+        this.videoPlayer.addEventListener('webkitfullscreenchange', (e) => e.preventDefault());
+        this.videoPlayer.addEventListener('fullscreenchange', (e) => e.preventDefault());
+        this.videoPlayer.addEventListener('webkitbeginfullscreen', (e) => e.preventDefault());
+        this.videoPlayer.addEventListener('webkitendfullscreen', (e) => e.preventDefault());
+        this.videoPlayer.addEventListener('enterpictureinpicture', (e) => e.preventDefault());
+        this.videoPlayer.addEventListener('leavepictureinpicture', (e) => e.preventDefault());
+        
+        // Deshabilitar menú contextual del video
+        this.videoPlayer.addEventListener('contextmenu', (e) => e.preventDefault());
         
         // Control events
         this.backBtn.addEventListener('click', () => this.goBack());
@@ -397,133 +412,141 @@ class NetflixVideoPlayer {
     
     async parseSubtitles(text) {
         this.subtitles = [];
-        const lines = text.split('\n');
-        let currentSubtitle = null;
-        let subtitleIndex = 0;
+        const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+        
+        // Variables para manejo de diferentes formatos
+        let expectingTime = false;
+        let expectingText = false;
+        let currentStart = 0;
+        let currentEnd = 0;
+        let textLines = [];
         
         for (let i = 0; i < lines.length; i++) {
-            let line = lines[i].trim();
-            if (!line) continue;
+            let line = lines[i];
             
-            // Detectar formato SRT estándar (inglés y español)
-            // Formato: número, tiempo, texto
-            if (/^\d+$/.test(line)) {
-                subtitleIndex = parseInt(line);
+            // Saltar líneas de metadatos VTT
+            if (line.toLowerCase().includes('webvtt') || 
+                line.toLowerCase().includes('kind:') || 
+                line.toLowerCase().includes('language:') ||
+                line.toLowerCase().includes('note:')) {
                 continue;
             }
             
-            // Parse YouTube VTT format: word<00:00:01.234><c> text</c>
-            const vttMatches = line.matchAll(/(\w+)<(\d{2}:\d{2}:\d{2}\.\d{3})><c>\s*([^<]*)<\/c>/g);
-            let hasVttMatches = false;
-            
-            for (let match of vttMatches) {
-                hasVttMatches = true;
-                const word = match[1];
-                const timeStr = match[2];
-                const startTime = this.parseTime(timeStr);
-                const endTime = startTime + 2;
+            // Formato VTT con timestamps embebidos: "palabra<00:00:12.160><c> texto</c>"
+            const vttTimestampMatch = line.match(/^(.+?)<(\d{2}:\d{2}:\d{2}\.\d{3})>(?:<c>(.+?)<\/c>)?/);
+            if (vttTimestampMatch) {
+                const baseText = vttTimestampMatch[1].trim();
+                const timestamp = vttTimestampMatch[2];
+                const additionalText = vttTimestampMatch[3] ? vttTimestampMatch[3].trim() : '';
                 
-                this.subtitles.push({
-                    start: startTime,
-                    end: endTime,
-                    text: word
-                });
+                const startTime = this.parseTime(timestamp);
+                let fullText = baseText;
+                
+                if (additionalText) {
+                    fullText = baseText + ' ' + additionalText;
+                }
+                
+                // Limpiar texto de tags HTML
+                fullText = fullText.replace(/<[^>]*>/g, '').trim();
+                
+                if (fullText.length > 1) {
+                    this.subtitles.push({
+                        start: startTime,
+                        end: startTime + 3,
+                        text: fullText
+                    });
+                }
+                continue;
             }
             
-            if (hasVttMatches) continue;
+            // Formato SRT: número de subtítulo
+            if (/^\d+$/.test(line) && !expectingText) {
+                if (textLines.length > 0) {
+                    // Guardar subtítulo anterior
+                    this.subtitles.push({
+                        start: currentStart,
+                        end: currentEnd,
+                        text: textLines.join(' ').trim()
+                    });
+                    textLines = [];
+                }
+                expectingTime = true;
+                expectingText = false;
+                continue;
+            }
             
-            // Parse WebVTT format
+            // Formato SRT/VTT: timestamps con -->
             if (line.includes('-->')) {
                 const timeMatch = line.match(/(\d{1,2}:\d{2}:\d{2}[.,]\d{2,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[.,]\d{2,3})/);
                 if (timeMatch) {
-                    const startTime = this.parseTime(timeMatch[1]);
-                    const endTime = this.parseTime(timeMatch[2]);
-                    
-                    // Buscar el texto en la siguiente línea
-                    let textLines = [];
-                    for (let j = i + 1; j < lines.length && lines[j].trim() !== ''; j++) {
-                        const textLine = lines[j].trim();
-                        if (textLine && !textLine.includes('-->') && !/^\d+$/.test(textLine)) {
-                            // Limpiar tags HTML/VTT
-                            const cleanText = textLine.replace(/<[^>]*>/g, '').trim();
-                            if (cleanText) {
-                                textLines.push(cleanText);
-                            }
-                        }
-                    }
-                    
-                    if (textLines.length > 0) {
-                        this.subtitles.push({
-                            start: startTime,
-                            end: endTime,
-                            text: textLines.join(' ')
-                        });
-                    }
+                    currentStart = this.parseTime(timeMatch[1]);
+                    currentEnd = this.parseTime(timeMatch[2]);
+                    expectingTime = false;
+                    expectingText = true;
                     continue;
                 }
             }
             
-            // Parse líneas con timestamps como: "text word<00:00:06.040><c> es</c>"
-            const timestampMatch = line.match(/^(.+?)<(\d{2}:\d{2}:\d{2}\.\d{3})>/);
-            if (timestampMatch) {
-                const text = timestampMatch[1].trim();
-                const timeStr = timestampMatch[2];
-                const startTime = this.parseTime(timeStr);
-                const endTime = startTime + 3;
+            // Procesar líneas de texto
+            if (expectingText || (!line.includes('-->') && !(/^\d+$/.test(line)))) {
+                // Limpiar línea de tags HTML/VTT
+                let cleanLine = line.replace(/<[^>]*>/g, '').trim();
                 
-                if (text && text.length > 1) {
-                    this.subtitles.push({
-                        start: startTime,
-                        end: endTime,
-                        text: text
-                    });
+                // Formato simple: "MM:SS texto"
+                const simpleTimeMatch = cleanLine.match(/^(\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\s+(.+)/);
+                if (simpleTimeMatch) {
+                    const startTime = this.parseTime(simpleTimeMatch[1]);
+                    const text = simpleTimeMatch[2].trim();
+                    
+                    if (text.length > 2) {
+                        this.subtitles.push({
+                            start: startTime,
+                            end: startTime + 4,
+                            text: text
+                        });
+                    }
+                    continue;
                 }
-                continue;
-            }
-            
-            // Parse formato simple con tiempo: "MM:SS texto"
-            const simpleTimeMatch = line.match(/^(\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\s+(.+)/);
-            if (simpleTimeMatch) {
-                const startTime = this.parseTime(simpleTimeMatch[1]);
-                const endTime = startTime + 4;
-                const text = simpleTimeMatch[2].trim();
                 
-                if (text && text.length > 2) {
-                    this.subtitles.push({
-                        start: startTime,
-                        end: endTime,
-                        text: text
-                    });
-                }
-                continue;
-            }
-            
-            // Parse texto simple (para archivos de texto sin timestamps)
-            if (!line.includes('<') && !line.includes('-->') && !line.match(/^\d+$/) && 
-                line.length > 3 && !line.toLowerCase().includes('webvtt') &&
-                !line.toLowerCase().includes('kind:') && !line.toLowerCase().includes('language:') &&
-                !line.toLowerCase().includes('note:')) {
-                
-                // Detectar si es texto en español o inglés
-                const isSpanishText = /[ñáéíóúü]|(?:que|con|por|para|una|una|del|las|los|muy|más|año|años|día|días)/i.test(line);
-                const isEnglishText = /\b(?:the|and|for|are|but|not|you|all|can|had|her|was|one|our|out|day|get|has|him|his|how|its|may|new|now|old|see|two|way|who|boy|did|man|men|she|too|any|use|your|work|life|only|over|said|each|make|most|move|must|name|well|also|back|call|came|come|could|every|first|from|good|great|hand|have|here|home|just|know|last|left|like|look|made|many|more|much|never|only|other|people|place|right|said|same|seem|should|since|some|still|such|take|than|them|these|they|think|this|those|time|very|water|were|what|when|where|which|while|will|with|would|write|year|years)\b/i.test(line);
-                
-                if (isSpanishText || isEnglishText || line.split(' ').length >= 2) {
-                    this.subtitles.push({
-                        start: this.subtitles.length * 4,
-                        end: (this.subtitles.length * 4) + 4,
-                        text: line
-                    });
+                // Verificar si es texto válido
+                if (cleanLine.length > 2) {
+                    // Detectar idiomas (español e inglés)
+                    const isSpanishText = /[ñáéíóúü¿¡]|(?:\b(?:que|con|por|para|una|del|las|los|muy|más|año|años|día|días|como|pero|todo|este|esta|desde|hasta|cuando|donde|puede|pueden|tiene|tienen|hacer|hace|otro|otra|otros|otras|tiempo|persona|personas|vida|trabajo|casa|mundo|país|estado|ciudad|gobierno|problema|problemas|parte|partes|grupo|grupos|momento|momentos|lugar|lugares|mano|manos|ojo|ojos|cosa|cosas|vez|veces|forma|formas|agua|fuego|tierra|aire|amor|corazón|familia|amigo|amigos|hermano|hermanos|padre|madre|hijo|hijos|mujer|hombre|niño|niños|dinero|trabajo|escuela|universidad|hospital|iglesia|calle|carro|casa|comida|agua|libro|libros|música|película|películas|juego|juegos|deporte|deportes|animal|animales|árbol|árboles|flor|flores|cielo|mar|sol|luna|estrella|estrellas)\b)/i.test(cleanLine);
+                    
+                    const isEnglishText = /\b(?:the|and|for|are|but|not|you|all|can|had|her|was|one|our|out|day|get|has|him|his|how|its|may|new|now|old|see|two|way|who|boy|did|man|men|she|too|any|use|your|work|life|only|over|said|each|make|most|move|must|name|well|also|back|call|came|come|could|every|first|from|good|great|hand|have|here|home|just|know|last|left|like|look|made|many|more|much|never|only|other|people|place|right|said|same|seem|should|since|some|still|such|take|than|them|these|they|think|this|those|time|very|water|were|what|when|where|which|while|will|with|would|write|year|years|about|after|again|before|being|between|both|during|each|few|into|through|under|until|while|without|world|would|write|written|year|years|young)\b/i.test(cleanLine);
+                    
+                    if (isSpanishText || isEnglishText || cleanLine.split(' ').length >= 2) {
+                        if (expectingText && currentStart >= 0 && currentEnd > currentStart) {
+                            textLines.push(cleanLine);
+                        } else {
+                            // Crear subtítulo sin timestamp específico
+                            const autoStart = this.subtitles.length * 3.5;
+                            this.subtitles.push({
+                                start: autoStart,
+                                end: autoStart + 3.5,
+                                text: cleanLine
+                            });
+                        }
+                    }
                 }
             }
         }
         
-        // Eliminar duplicados y ordenar por tiempo
+        // Agregar último subtítulo si queda pendiente
+        if (textLines.length > 0 && currentStart >= 0 && currentEnd > currentStart) {
+            this.subtitles.push({
+                start: currentStart,
+                end: currentEnd,
+                text: textLines.join(' ').trim()
+            });
+        }
+        
+        // Eliminar duplicados y ordenar
         const uniqueSubtitles = [];
         const seen = new Set();
         
         for (let subtitle of this.subtitles) {
-            const key = `${subtitle.start}-${subtitle.text}`;
+            const key = `${Math.floor(subtitle.start)}-${subtitle.text.substring(0, 20)}`;
             if (!seen.has(key) && subtitle.text.length > 1) {
                 seen.add(key);
                 uniqueSubtitles.push(subtitle);
@@ -600,11 +623,33 @@ class NetflixVideoPlayer {
         const currentTime = this.videoPlayer.currentTime;
         let activeSubtitle = null;
         
+        // Buscar subtítulo con tolerancia de tiempo mejorada
         for (let subtitle of this.subtitles) {
-            if (currentTime >= subtitle.start && currentTime <= subtitle.end) {
+            const tolerance = 0.3; // 300ms de tolerancia
+            if (currentTime >= (subtitle.start - tolerance) && currentTime <= (subtitle.end + tolerance)) {
                 activeSubtitle = subtitle;
                 break;
             }
+        }
+        
+        // Si no encontramos con tolerancia, buscar el más cercano
+        if (!activeSubtitle) {
+            let closestSubtitle = null;
+            let closestDistance = Infinity;
+            
+            for (let subtitle of this.subtitles) {
+                const distance = Math.min(
+                    Math.abs(currentTime - subtitle.start),
+                    Math.abs(currentTime - subtitle.end)
+                );
+                
+                if (distance < closestDistance && distance < 1.0) { // 1 segundo de distancia máxima
+                    closestDistance = distance;
+                    closestSubtitle = subtitle;
+                }
+            }
+            
+            activeSubtitle = closestSubtitle;
         }
         
         if (activeSubtitle && activeSubtitle !== this.currentSubtitle) {
@@ -614,18 +659,25 @@ class NetflixVideoPlayer {
             
             // Añadir efecto de highlight temporal
             setTimeout(() => {
-                this.subtitleText.classList.add('highlight');
+                if (this.subtitleText.style.display === 'block') {
+                    this.subtitleText.classList.add('highlight');
+                }
             }, 50);
             
             setTimeout(() => {
                 this.subtitleText.classList.remove('highlight');
-            }, 500);
+            }, 600);
             
             this.currentSubtitle = activeSubtitle;
         } else if (!activeSubtitle && this.currentSubtitle) {
-            this.subtitleText.style.display = 'none';
-            this.subtitleText.classList.remove('highlight');
-            this.currentSubtitle = null;
+            // Mantener subtítulo visible un poco más tiempo
+            setTimeout(() => {
+                if (!activeSubtitle) {
+                    this.subtitleText.style.display = 'none';
+                    this.subtitleText.classList.remove('highlight');
+                    this.currentSubtitle = null;
+                }
+            }, 200);
         }
     }
     
@@ -695,23 +747,8 @@ class NetflixVideoPlayer {
                                 document.msFullscreenElement;
             
             if (!isFullscreen) {
-                // Enter fullscreen
-                const element = this.playerSection;
-                
-                if (element && typeof element.requestFullscreen === 'function') {
-                    element.requestFullscreen().catch(() => this.simulateFullscreen(true));
-                } else if (element && typeof element.webkitRequestFullscreen === 'function') {
-                    element.webkitRequestFullscreen();
-                } else if (element && typeof element.webkitRequestFullScreen === 'function') {
-                    element.webkitRequestFullScreen();
-                } else if (element && typeof element.mozRequestFullScreen === 'function') {
-                    element.mozRequestFullScreen();
-                } else if (element && typeof element.msRequestFullscreen === 'function') {
-                    element.msRequestFullscreen();
-                } else {
-                    // Fallback: simulate fullscreen with CSS
-                    this.simulateFullscreen(true);
-                }
+                // Enter fullscreen - usar simulación CSS en lugar de API nativa
+                this.simulateFullscreen(true);
             } else {
                 // Exit fullscreen
                 if (document.exitFullscreen && typeof document.exitFullscreen === 'function') {
@@ -725,13 +762,11 @@ class NetflixVideoPlayer {
                 } else if (document.msExitFullscreen && typeof document.msExitFullscreen === 'function') {
                     document.msExitFullscreen();
                 } else {
-                    // Fallback: exit simulated fullscreen
                     this.simulateFullscreen(false);
                 }
             }
         } catch (err) {
-            console.error('Error toggling fullscreen:', err);
-            // Fallback to CSS simulation
+            console.log('Using CSS fullscreen simulation');
             this.simulateFullscreen(!this.playerSection.classList.contains('simulated-fullscreen'));
         }
     }
