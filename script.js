@@ -11,10 +11,23 @@ class NetflixVideoPlayer {
         this.currentVideoId = null;
         this.filteredVideos = [];
         
+        // Audio system
+        this.audioContext = null;
+        this.audioSource = null;
+        this.analyser = null;
+        this.equalizer = null;
+        this.gainNode = null;
+        this.bassBoostFilter = null;
+        this.reverbNode = null;
+        this.compressorNode = null;
+        this.visualizerType = 'bars';
+        this.animationId = null;
+        
         this.initializeElements();
         this.bindEvents();
         this.loadVideoLibrary();
         this.renderVideoGrid();
+        this.initializeAudioSystem();
     }
     
     initializeElements() {
@@ -63,6 +76,13 @@ class NetflixVideoPlayer {
         this.editTitleInput = document.getElementById('editTitleInput');
         this.saveTitle = document.getElementById('saveTitle');
         this.cancelEdit = document.getElementById('cancelEdit');
+        
+        // Audio modal elements
+        this.audioBtn = document.getElementById('audioBtn');
+        this.audioModal = document.getElementById('audioModal');
+        this.closeAudio = document.getElementById('closeAudio');
+        this.resetAudio = document.getElementById('resetAudio');
+        this.audioVisualizer = document.getElementById('audioVisualizer');
     }
     
     bindEvents() {
@@ -79,6 +99,11 @@ class NetflixVideoPlayer {
         this.editTitleBtn.addEventListener('click', () => this.showEditModal());
         this.saveTitle.addEventListener('click', () => this.saveVideoTitle());
         this.cancelEdit.addEventListener('click', () => this.hideEditModal());
+        
+        // Audio modal events
+        this.audioBtn.addEventListener('click', () => this.showAudioModal());
+        this.closeAudio.addEventListener('click', () => this.hideAudioModal());
+        this.resetAudio.addEventListener('click', () => this.resetAudioSettings());
         
         // Video events
         this.videoPlayer.addEventListener('loadedmetadata', () => this.onVideoLoaded());
@@ -361,6 +386,11 @@ class NetflixVideoPlayer {
             this.subtitlesEnabled = false;
             this.subtitleBtn.classList.remove('active');
         }
+        
+        // Setup audio system when video loads
+        this.videoPlayer.addEventListener('loadeddata', () => {
+            this.setupAudioNodes();
+        }, { once: true });
         
         this.showControls();
     }
@@ -955,6 +985,311 @@ class NetflixVideoPlayer {
             month: 'short',
             day: 'numeric'
         });
+    }
+    
+    // Audio System Methods
+    async initializeAudioSystem() {
+        try {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            this.setupAudioEventListeners();
+        } catch (error) {
+            console.log('Web Audio API not supported');
+        }
+    }
+    
+    setupAudioEventListeners() {
+        // Equalizer sliders
+        document.querySelectorAll('.eq-slider').forEach(slider => {
+            slider.addEventListener('input', (e) => this.updateEqualizer(e));
+        });
+        
+        // Effect controls
+        document.getElementById('bassBoost').addEventListener('input', (e) => this.updateBassBoost(e.target.value));
+        document.getElementById('reverbEffect').addEventListener('input', (e) => this.updateReverb(e.target.value));
+        document.getElementById('compressorEffect').addEventListener('input', (e) => this.updateCompressor(e.target.value));
+        
+        // Preset buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.applyPreset(e.target.dataset.preset));
+        });
+        
+        // Visualizer buttons
+        document.querySelectorAll('.visualizer-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.changeVisualizerType(e.target.dataset.type));
+        });
+    }
+    
+    async setupAudioNodes() {
+        if (!this.audioContext || !this.videoPlayer) return;
+        
+        try {
+            if (this.audioSource) {
+                this.audioSource.disconnect();
+            }
+            
+            this.audioSource = this.audioContext.createMediaElementSource(this.videoPlayer);
+            this.analyser = this.audioContext.createAnalyser();
+            this.gainNode = this.audioContext.createGain();
+            
+            // Create equalizer bands
+            this.equalizer = [];
+            const frequencies = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
+            
+            frequencies.forEach(freq => {
+                const filter = this.audioContext.createBiquadFilter();
+                filter.type = 'peaking';
+                filter.frequency.value = freq;
+                filter.Q.value = 1;
+                filter.gain.value = 0;
+                this.equalizer.push(filter);
+            });
+            
+            // Create effects
+            this.bassBoostFilter = this.audioContext.createBiquadFilter();
+            this.bassBoostFilter.type = 'lowshelf';
+            this.bassBoostFilter.frequency.value = 200;
+            this.bassBoostFilter.gain.value = 0;
+            
+            this.compressorNode = this.audioContext.createDynamicsCompressor();
+            this.compressorNode.threshold.value = -24;
+            this.compressorNode.knee.value = 30;
+            this.compressorNode.ratio.value = 12;
+            this.compressorNode.attack.value = 0.003;
+            this.compressorNode.release.value = 0.25;
+            
+            // Connect nodes
+            let currentNode = this.audioSource;
+            
+            // Connect equalizer
+            this.equalizer.forEach(filter => {
+                currentNode.connect(filter);
+                currentNode = filter;
+            });
+            
+            // Connect effects
+            currentNode.connect(this.bassBoostFilter);
+            this.bassBoostFilter.connect(this.compressorNode);
+            this.compressorNode.connect(this.gainNode);
+            this.gainNode.connect(this.analyser);
+            this.analyser.connect(this.audioContext.destination);
+            
+            // Setup analyzer
+            this.analyser.fftSize = 256;
+            this.startVisualizer();
+            
+        } catch (error) {
+            console.error('Error setting up audio nodes:', error);
+        }
+    }
+    
+    updateEqualizer(event) {
+        const slider = event.target;
+        const freq = parseInt(slider.dataset.freq);
+        const gain = parseFloat(slider.value);
+        const valueSpan = slider.parentElement.querySelector('.eq-value');
+        
+        valueSpan.textContent = `${gain > 0 ? '+' : ''}${gain}dB`;
+        
+        if (this.equalizer) {
+            const filter = this.equalizer.find(f => f.frequency.value === freq);
+            if (filter) {
+                filter.gain.value = gain;
+            }
+        }
+    }
+    
+    updateBassBoost(value) {
+        const valueSpan = document.querySelector('#bassBoost').parentElement.querySelector('.effect-value');
+        valueSpan.textContent = `${value}%`;
+        
+        if (this.bassBoostFilter) {
+            this.bassBoostFilter.gain.value = (value / 100) * 12;
+        }
+    }
+    
+    updateReverb(value) {
+        const valueSpan = document.querySelector('#reverbEffect').parentElement.querySelector('.effect-value');
+        valueSpan.textContent = `${value}%`;
+        
+        // Reverb simulation with delay
+        if (this.gainNode) {
+            const reverbAmount = value / 100;
+            // This is a simplified reverb effect
+        }
+    }
+    
+    updateCompressor(value) {
+        const valueSpan = document.querySelector('#compressorEffect').parentElement.querySelector('.effect-value');
+        valueSpan.textContent = `${value}%`;
+        
+        if (this.compressorNode) {
+            const ratio = 1 + (value / 100) * 19;
+            this.compressorNode.ratio.value = ratio;
+        }
+    }
+    
+    applyPreset(presetName) {
+        const presets = {
+            flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            rock: [3, 2, -1, -2, -1, 2, 4, 5, 5, 5],
+            pop: [-1, 2, 4, 4, 1, -1, -2, -2, -1, -1],
+            jazz: [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
+            classical: [3, 2, -1, -2, -1, 2, 3, 4, 4, 5],
+            electronic: [4, 3, 1, 0, -1, 1, 2, 4, 5, 5]
+        };
+        
+        const values = presets[presetName] || presets.flat;
+        const sliders = document.querySelectorAll('.eq-slider');
+        
+        sliders.forEach((slider, index) => {
+            if (values[index] !== undefined) {
+                slider.value = values[index];
+                const event = { target: slider };
+                this.updateEqualizer(event);
+            }
+        });
+        
+        // Update preset button styles
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.preset === presetName);
+        });
+    }
+    
+    changeVisualizerType(type) {
+        this.visualizerType = type;
+        
+        document.querySelectorAll('.visualizer-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.type === type);
+        });
+    }
+    
+    startVisualizer() {
+        if (!this.analyser || !this.audioVisualizer) return;
+        
+        const canvas = this.audioVisualizer;
+        const ctx = canvas.getContext('2d');
+        const bufferLength = this.analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        const draw = () => {
+            this.animationId = requestAnimationFrame(draw);
+            
+            this.analyser.getByteFrequencyData(dataArray);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const barWidth = canvas.width / bufferLength * 2.5;
+            let x = 0;
+            
+            switch (this.visualizerType) {
+                case 'bars':
+                    for (let i = 0; i < bufferLength; i++) {
+                        const barHeight = (dataArray[i] / 255) * canvas.height;
+                        
+                        const gradient = ctx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
+                        gradient.addColorStop(0, '#fd5949');
+                        gradient.addColorStop(0.5, '#d6249f');
+                        gradient.addColorStop(1, '#285AEB');
+                        
+                        ctx.fillStyle = gradient;
+                        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                        
+                        x += barWidth + 1;
+                    }
+                    break;
+                    
+                case 'wave':
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#fd5949';
+                    ctx.beginPath();
+                    
+                    const sliceWidth = canvas.width / bufferLength;
+                    x = 0;
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = v * canvas.height / 2;
+                        
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                        
+                        x += sliceWidth;
+                    }
+                    
+                    ctx.stroke();
+                    break;
+                    
+                case 'circle':
+                    const centerX = canvas.width / 2;
+                    const centerY = canvas.height / 2;
+                    const radius = Math.min(centerX, centerY) - 10;
+                    
+                    ctx.strokeStyle = '#fd5949';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+                    ctx.stroke();
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        const angle = (i / bufferLength) * 2 * Math.PI;
+                        const amplitude = (dataArray[i] / 255) * 20;
+                        
+                        const x1 = centerX + Math.cos(angle) * radius;
+                        const y1 = centerY + Math.sin(angle) * radius;
+                        const x2 = centerX + Math.cos(angle) * (radius + amplitude);
+                        const y2 = centerY + Math.sin(angle) * (radius + amplitude);
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.stroke();
+                    }
+                    break;
+            }
+        };
+        
+        draw();
+    }
+    
+    showAudioModal() {
+        this.audioModal.style.display = 'flex';
+        
+        // Initialize audio context on user interaction
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume();
+        }
+    }
+    
+    hideAudioModal() {
+        this.audioModal.style.display = 'none';
+    }
+    
+    resetAudioSettings() {
+        // Reset equalizer
+        document.querySelectorAll('.eq-slider').forEach(slider => {
+            slider.value = 0;
+            const event = { target: slider };
+            this.updateEqualizer(event);
+        });
+        
+        // Reset effects
+        document.getElementById('bassBoost').value = 0;
+        document.getElementById('reverbEffect').value = 0;
+        document.getElementById('compressorEffect').value = 0;
+        
+        this.updateBassBoost(0);
+        this.updateReverb(0);
+        this.updateCompressor(0);
+        
+        // Reset presets
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector('[data-preset="flat"]').classList.add('active');
     }
 }
 
