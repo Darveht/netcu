@@ -1,384 +1,458 @@
-
-class NetflixVideoPlayer {
+class VideoHubPlayer {
     constructor() {
-        this.video = null;
+        this.videoLibrary = this.loadVideoLibrary();
+        this.currentVideo = null;
+        this.currentSection = 'feed';
+        this.dualAudioEnabled = false;
+        this.currentLanguage = 'spanish';
+        this.backgroundPlayEnabled = false;
         this.subtitles = [];
         this.currentSubtitle = null;
         this.subtitlesEnabled = false;
         this.controlsTimeout = null;
-        this.isDragging = false;
-        this.videoLibrary = [];
-        this.currentVideoId = null;
-        this.filteredVideos = [];
-        
-        // Audio system
+        this.uploadProgress = 0;
+
+        // Audio contexts for dual language
         this.audioContext = null;
-        this.audioSource = null;
-        this.analyser = null;
-        this.equalizer = null;
-        this.gainNode = null;
-        this.bassBoostFilter = null;
-        this.reverbNode = null;
-        this.compressorNode = null;
-        this.visualizerType = 'bars';
-        this.animationId = null;
-        
+        this.spanishAudio = null;
+        this.englishAudio = null;
+        this.currentAudioSource = null;
+
         this.initializeElements();
         this.bindEvents();
-        this.loadVideoLibrary();
-        this.renderVideoGrid();
-        this.initializeAudioSystem();
+        this.renderContent();
+        this.checkBackgroundPlay();
+
+        // Initialize audio context on first user interaction
+        document.addEventListener('click', () => {
+            if (!this.audioContext) {
+                this.initAudioContext();
+            }
+        }, { once: true });
     }
-    
+
     initializeElements() {
-        // Library elements
-        this.librarySection = document.getElementById('librarySection');
-        this.videoGrid = document.getElementById('videoGrid');
-        this.searchInput = document.getElementById('searchInput');
-        this.addVideoBtn = document.getElementById('addVideoBtn');
-        this.addFirstVideoBtn = document.getElementById('addFirstVideoBtn');
-        
-        // Upload elements
+        // Navigation
+        this.feedNavBtn = document.getElementById('feedNavBtn');
+        this.tvNavBtn = document.getElementById('tvNavBtn');
+        this.uploadNavBtn = document.getElementById('uploadNavBtn');
+
+        // Sidebar
+        this.feedSidebarBtn = document.getElementById('feedSidebarBtn');
+        this.tvSidebarBtn = document.getElementById('tvSidebarBtn');
+        this.uploadSidebarBtn = document.getElementById('uploadSidebarBtn');
+
+        // Sections
+        this.feedSection = document.getElementById('feedSection');
+        this.tvSection = document.getElementById('tvSection');
         this.uploadSection = document.getElementById('uploadSection');
         this.playerSection = document.getElementById('playerSection');
+
+        // Upload elements
+        this.uploadForm = document.getElementById('uploadForm');
         this.videoFile = document.getElementById('videoFile');
-        this.subtitleFile = document.getElementById('subtitleFile');
         this.videoTitle = document.getElementById('videoTitle');
-        this.loadMediaBtn = document.getElementById('loadMedia');
+        this.videoDescription = document.getElementById('videoDescription');
+        this.subtitleFile = document.getElementById('subtitleFile');
+        this.videoFormat = document.getElementById('videoFormat');
         this.cancelUpload = document.getElementById('cancelUpload');
-        
+        this.uploadBtn = document.getElementById('uploadBtn');
+
+        // Dual audio
+        this.dualAudioToggle = document.getElementById('dualAudioToggle');
+        this.dualAudioInputs = document.getElementById('dualAudioInputs');
+        this.audioSpanish = document.getElementById('audioSpanish');
+        this.audioEnglish = document.getElementById('audioEnglish');
+
+        // Loading
+        this.uploadLoading = document.getElementById('uploadLoading');
+        this.uploadProgress = document.getElementById('uploadProgress');
+        this.loadingText = document.getElementById('loadingText');
+        this.loadingSubtext = document.getElementById('loadingSubtext');
+
+        // Content containers
+        this.videoPosts = document.getElementById('videoPosts');
+        this.tvGrid = document.getElementById('tvGrid');
+
         // Player elements
         this.videoPlayer = document.getElementById('videoPlayer');
-        this.subtitleText = document.getElementById('subtitleText');
         this.controlsOverlay = document.getElementById('controlsOverlay');
-        this.loadingSpinner = document.getElementById('loadingSpinner');
         this.videoTitleDisplay = document.getElementById('videoTitleDisplay');
-        
-        // Control elements
+        this.subtitleText = document.getElementById('subtitleText');
+        this.languageSwitch = document.getElementById('languageSwitch');
+        this.backgroundPlayToggle = document.getElementById('backgroundPlayToggle');
+
+        // Controls
         this.backBtn = document.getElementById('backBtn');
         this.centerPlayBtn = document.getElementById('centerPlayBtn');
         this.playPauseBtn = document.getElementById('playPauseBtn');
         this.volumeBtn = document.getElementById('volumeBtn');
-        this.volumeSlider = document.getElementById('volumeSlider');
         this.subtitleBtn = document.getElementById('subtitleBtn');
         this.fullscreenBtn = document.getElementById('fullscreenBtn');
-        this.editTitleBtn = document.getElementById('editTitleBtn');
-        
-        // Progress elements
-        this.progressBar = document.querySelector('.progress-bar');
+        this.progressBar = document.getElementById('progressBar');
         this.progressFilled = document.getElementById('progressFilled');
-        this.progressHandle = document.getElementById('progressHandle');
         this.currentTimeEl = document.getElementById('currentTime');
         this.durationEl = document.getElementById('duration');
-        
-        // Modal elements
-        this.editModal = document.getElementById('editModal');
-        this.editTitleInput = document.getElementById('editTitleInput');
-        this.saveTitle = document.getElementById('saveTitle');
-        this.cancelEdit = document.getElementById('cancelEdit');
-        
-        // Audio modal elements
-        this.audioBtn = document.getElementById('audioBtn');
-        this.audioModal = document.getElementById('audioModal');
-        this.closeAudio = document.getElementById('closeAudio');
-        this.resetAudio = document.getElementById('resetAudio');
-        this.audioVisualizer = document.getElementById('audioVisualizer');
     }
-    
+
     bindEvents() {
-        // Library events
-        this.searchInput.addEventListener('input', (e) => this.searchVideos(e.target.value));
-        this.addVideoBtn.addEventListener('click', () => this.showUploadSection());
-        this.addFirstVideoBtn.addEventListener('click', () => this.showUploadSection());
-        
+        // Navigation events
+        this.feedNavBtn.addEventListener('click', () => this.showSection('feed'));
+        this.tvNavBtn.addEventListener('click', () => this.showSection('tv'));
+        this.uploadNavBtn.addEventListener('click', () => this.showSection('upload'));
+
+        this.feedSidebarBtn.addEventListener('click', () => this.showSection('feed'));
+        this.tvSidebarBtn.addEventListener('click', () => this.showSection('tv'));
+        this.uploadSidebarBtn.addEventListener('click', () => this.showSection('upload'));
+
         // Upload events
-        this.loadMediaBtn.addEventListener('click', () => this.saveVideo());
-        this.cancelUpload.addEventListener('click', () => this.showLibrary());
-        
-        // Modal events
-        this.editTitleBtn.addEventListener('click', () => this.showEditModal());
-        this.saveTitle.addEventListener('click', () => this.saveVideoTitle());
-        this.cancelEdit.addEventListener('click', () => this.hideEditModal());
-        
-        // Audio modal events
-        this.audioBtn.addEventListener('click', () => this.showAudioModal());
-        this.closeAudio.addEventListener('click', () => this.hideAudioModal());
-        this.resetAudio.addEventListener('click', () => this.resetAudioSettings());
-        
+        this.uploadForm.addEventListener('submit', (e) => this.handleUpload(e));
+        this.cancelUpload.addEventListener('click', () => this.showSection('feed'));
+        this.dualAudioToggle.addEventListener('click', () => this.toggleDualAudio());
+
+        // Player events
+        this.backBtn.addEventListener('click', () => this.closePlayer());
+        this.centerPlayBtn.addEventListener('click', () => this.togglePlayPause());
+        this.playPauseBtn.addEventListener('click', () => this.togglePlayPause());
+        this.volumeBtn.addEventListener('click', () => this.toggleMute());
+        this.subtitleBtn.addEventListener('click', () => this.toggleSubtitles());
+        this.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
+        this.backgroundPlayToggle.addEventListener('click', () => this.toggleBackgroundPlay());
+
         // Video events
         this.videoPlayer.addEventListener('loadedmetadata', () => this.onVideoLoaded());
         this.videoPlayer.addEventListener('timeupdate', () => this.onTimeUpdate());
         this.videoPlayer.addEventListener('ended', () => this.onVideoEnded());
-        this.videoPlayer.addEventListener('waiting', () => this.showLoading());
-        this.videoPlayer.addEventListener('canplay', () => this.hideLoading());
-        this.videoPlayer.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            this.togglePlayPause();
-        });
-        
-        // Bloquear eventos nativos que causan expansión
-        this.videoPlayer.addEventListener('webkitfullscreenchange', (e) => e.preventDefault());
-        this.videoPlayer.addEventListener('fullscreenchange', (e) => e.preventDefault());
-        this.videoPlayer.addEventListener('webkitbeginfullscreen', (e) => e.preventDefault());
-        this.videoPlayer.addEventListener('webkitendfullscreen', (e) => e.preventDefault());
-        this.videoPlayer.addEventListener('enterpictureinpicture', (e) => e.preventDefault());
-        this.videoPlayer.addEventListener('leavepictureinpicture', (e) => e.preventDefault());
-        
-        // Deshabilitar menú contextual del video
-        this.videoPlayer.addEventListener('contextmenu', (e) => e.preventDefault());
-        
-        // Control events
-        this.backBtn.addEventListener('click', () => this.goBack());
-        this.centerPlayBtn.addEventListener('click', () => this.togglePlayPause());
-        this.playPauseBtn.addEventListener('click', () => this.togglePlayPause());
-        this.volumeBtn.addEventListener('click', () => this.toggleMute());
-        this.volumeSlider.addEventListener('input', (e) => this.setVolume(e.target.value));
-        this.subtitleBtn.addEventListener('click', () => this.toggleSubtitles());
-        this.fullscreenBtn.addEventListener('click', () => this.toggleFullscreen());
-        
-        // Progress bar events
+        this.videoPlayer.addEventListener('click', () => this.togglePlayPause());
+
+        // Progress bar
         this.progressBar.addEventListener('click', (e) => this.seekTo(e));
-        this.progressBar.addEventListener('mousedown', (e) => this.startDrag(e));
-        document.addEventListener('mousemove', (e) => this.drag(e));
-        document.addEventListener('mouseup', () => this.endDrag());
-        
+
+        // Language switch
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.switchLanguage(e.target.dataset.lang));
+        });
+
         // Controls visibility
         this.playerSection.addEventListener('mousemove', () => this.showControls());
         this.playerSection.addEventListener('mouseleave', () => this.hideControls());
-        this.controlsOverlay.addEventListener('mouseenter', () => this.showControls());
-        
-        // Keyboard controls
+
+        // TV filters
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => this.filterTVContent(e.target.dataset.filter));
+        });
+
+        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
-        
-        // Orientation change
-        window.addEventListener('orientationchange', () => {
-            setTimeout(() => this.handleOrientationChange(), 500);
+
+        // Background play detection
+        document.addEventListener('visibilitychange', () => this.handleVisibilityChange());
+    }
+
+    showSection(section) {
+        // Update active states
+        document.querySelectorAll('.nav-item, .sidebar-item').forEach(item => {
+            item.classList.remove('active');
         });
-        
-        // Fullscreen events
-        document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
-        document.addEventListener('webkitfullscreenchange', () => this.onFullscreenChange());
-        document.addEventListener('mozfullscreenchange', () => this.onFullscreenChange());
-    }
-    
-    // Video Library Management
-    loadVideoLibrary() {
-        // Try to load from new metadata storage first
-        const metadata = localStorage.getItem('netflix_video_metadata');
-        if (metadata) {
-            this.videoLibrary = JSON.parse(metadata);
-        } else {
-            // Fallback to old storage method
-            const stored = localStorage.getItem('netflix_video_library');
-            if (stored) {
-                this.videoLibrary = JSON.parse(stored);
-            }
-        }
-        this.filteredVideos = [...this.videoLibrary];
-    }
-    
-    saveVideoLibrary() {
-        localStorage.setItem('netflix_video_library', JSON.stringify(this.videoLibrary));
-    }
-    
-    saveVideoLibraryMetadata() {
-        // Save only metadata, not the actual video files
-        const metadata = this.videoLibrary.map(video => ({
-            id: video.id,
-            title: video.title,
-            subtitleData: video.subtitleData,
-            duration: video.duration,
-            createdAt: video.createdAt,
-            type: video.type,
-            size: video.size
-        }));
-        localStorage.setItem('netflix_video_metadata', JSON.stringify(metadata));
-    }
-    
-    generateVideoId() {
-        return Date.now().toString(36) + Math.random().toString(36).substr(2);
-    }
-    
-    showUploadSection() {
-        this.librarySection.style.display = 'none';
-        this.uploadSection.style.display = 'flex';
-        this.videoTitle.value = '';
-        this.videoFile.value = '';
-        this.subtitleFile.value = '';
-    }
-    
-    showLibrary() {
+
+        // Hide all sections
+        this.feedSection.style.display = 'none';
+        this.tvSection.style.display = 'none';
         this.uploadSection.style.display = 'none';
-        this.playerSection.style.display = 'none';
-        this.librarySection.style.display = 'block';
-        this.renderVideoGrid();
+
+        // Show selected section
+        switch(section) {
+            case 'feed':
+                this.feedSection.style.display = 'block';
+                this.feedNavBtn.classList.add('active');
+                this.feedSidebarBtn.classList.add('active');
+                this.renderFeed();
+                break;
+            case 'tv':
+                this.tvSection.style.display = 'block';
+                this.tvNavBtn.classList.add('active');
+                this.tvSidebarBtn.classList.add('active');
+                this.renderTV();
+                break;
+            case 'upload':
+                this.uploadSection.style.display = 'block';
+                this.uploadNavBtn.classList.add('active');
+                this.uploadSidebarBtn.classList.add('active');
+                break;
+        }
+
+        this.currentSection = section;
     }
-    
-    async saveVideo() {
+
+    toggleDualAudio() {
+        this.dualAudioEnabled = !this.dualAudioEnabled;
+        this.dualAudioToggle.classList.toggle('active', this.dualAudioEnabled);
+        this.dualAudioInputs.classList.toggle('active', this.dualAudioEnabled);
+    }
+
+    async handleUpload(e) {
+        e.preventDefault();
+
         const videoFile = this.videoFile.files[0];
-        const subtitleFile = this.subtitleFile.files[0];
         const title = this.videoTitle.value.trim();
-        
-        if (!videoFile) {
-            alert('Por favor selecciona un archivo de video');
+        const description = this.videoDescription.value.trim();
+        const format = this.videoFormat.value;
+
+        if (!videoFile || !title) {
+            alert('Por favor completa los campos obligatorios');
             return;
         }
-        
-        if (!title) {
-            alert('Por favor ingresa un título para el video');
-            return;
-        }
-        
-        // Check file size (limit to 50MB for better performance)
-        if (videoFile.size > 50 * 1024 * 1024) {
-            alert('El archivo de video es muy grande. Por favor selecciona un archivo menor a 50MB.');
-            return;
-        }
-        
-        this.showLoading();
-        
+
+        // Show loading animation
+        this.showUploadLoading();
+
         try {
-            // Create object URL instead of base64 for better performance
-            const videoData = URL.createObjectURL(videoFile);
-            let subtitleData = null;
-            
-            if (subtitleFile) {
-                subtitleData = await subtitleFile.text();
-            }
-            
-            const videoId = this.generateVideoId();
-            const videoEntry = {
-                id: videoId,
+            const videoData = {
+                id: this.generateId(),
                 title: title,
-                videoData: videoData,
-                videoFile: videoFile, // Store file reference
-                subtitleData: subtitleData,
-                duration: 0,
+                description: description,
+                format: format,
+                videoUrl: URL.createObjectURL(videoFile),
+                videoFile: videoFile,
                 createdAt: new Date().toISOString(),
-                type: videoFile.type,
-                size: videoFile.size
+                likes: 0,
+                views: 0,
+                duration: 0
             };
-            
-            this.videoLibrary.push(videoEntry);
-            this.saveVideoLibraryMetadata(); // Save only metadata, not the file
-            this.filteredVideos = [...this.videoLibrary];
-            
-            this.hideLoading();
-            this.showLibrary();
-            
-        } catch (error) {
-            console.error('Error saving video:', error);
-            
-            // Mensaje de error más específico
-            let errorMessage = 'Error al guardar el video.';
-            if (error.name === 'QuotaExceededError') {
-                errorMessage = 'No hay suficiente espacio de almacenamiento. Intenta con un archivo más pequeño.';
-            } else if (error.message && error.message.includes('size')) {
-                errorMessage = 'El archivo es muy grande. Por favor selecciona un archivo menor a 50MB.';
-            } else {
-                errorMessage = 'Error al procesar el video. Verifica que el archivo sea válido.';
+
+            // Handle subtitles
+            if (this.subtitleFile.files[0]) {
+                videoData.subtitles = await this.subtitleFile.files[0].text();
             }
-            
-            alert(errorMessage);
-            this.hideLoading();
+
+            // Handle dual audio
+            if (this.dualAudioEnabled) {
+                if (this.audioSpanish.files[0]) {
+                    videoData.audioSpanish = URL.createObjectURL(this.audioSpanish.files[0]);
+                }
+                if (this.audioEnglish.files[0]) {
+                    videoData.audioEnglish = URL.createObjectURL(this.audioEnglish.files[0]);
+                }
+                videoData.hasDualAudio = true;
+            }
+
+            // Simulate upload progress
+            await this.simulateUploadProgress();
+
+            // Save to library
+            this.videoLibrary.push(videoData);
+            this.saveVideoLibrary();
+
+            // Show success and redirect
+            this.hideUploadLoading();
+            this.showUploadSuccess();
+
+            setTimeout(() => {
+                this.resetUploadForm();
+                this.showSection('feed');
+            }, 2000);
+
+        } catch (error) {
+            console.error('Upload error:', error);
+            this.hideUploadLoading();
+            alert('Error al subir el video. Inténtalo de nuevo.');
         }
     }
-    
-    fileToBase64(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
-        });
-    }
-    
-    searchVideos(query) {
-        if (!query.trim()) {
-            this.filteredVideos = [...this.videoLibrary];
-        } else {
-            this.filteredVideos = this.videoLibrary.filter(video =>
-                video.title.toLowerCase().includes(query.toLowerCase())
-            );
+
+    async simulateUploadProgress() {
+        const steps = [
+            { progress: 10, text: 'Verificando archivo...', subtext: 'Validando formato de video' },
+            { progress: 25, text: 'Procesando video...', subtext: 'Optimizando calidad' },
+            { progress: 50, text: 'Procesando audio...', subtext: 'Configurando idiomas' },
+            { progress: 75, text: 'Generando miniatura...', subtext: 'Creando vista previa' },
+            { progress: 90, text: 'Guardando...', subtext: 'Finalizando proceso' },
+            { progress: 100, text: '¡Completado!', subtext: 'Video subido exitosamente' }
+        ];
+
+        for (let step of steps) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+            this.updateUploadProgress(step.progress, step.text, step.subtext);
         }
-        this.renderVideoGrid();
     }
-    
-    renderVideoGrid() {
-        if (this.filteredVideos.length === 0) {
-            this.videoGrid.innerHTML = `
-                <div class="empty-library">
-                    <p>${this.videoLibrary.length === 0 ? 'No hay videos en tu biblioteca' : 'No se encontraron videos'}</p>
-                    <button class="netflix-button" onclick="window.player.showUploadSection()">
-                        ${this.videoLibrary.length === 0 ? 'Agregar tu primer video' : 'Agregar video'}
+
+    updateUploadProgress(progress, text, subtext) {
+        this.uploadProgress.style.width = `${progress}%`;
+        this.loadingText.textContent = text;
+        this.loadingSubtext.textContent = subtext;
+    }
+
+    showUploadLoading() {
+        this.uploadForm.style.display = 'none';
+        this.uploadLoading.style.display = 'block';
+    }
+
+    hideUploadLoading() {
+        this.uploadLoading.style.display = 'none';
+        this.uploadForm.style.display = 'block';
+    }
+
+    showUploadSuccess() {
+        this.uploadForm.classList.add('upload-success');
+        this.loadingText.textContent = '¡Video subido exitosamente!';
+        this.loadingSubtext.textContent = 'Redirigiendo al feed...';
+    }
+
+    resetUploadForm() {
+        this.uploadForm.reset();
+        this.uploadForm.classList.remove('upload-success');
+        this.dualAudioEnabled = false;
+        this.dualAudioToggle.classList.remove('active');
+        this.dualAudioInputs.classList.remove('active');
+        this.updateUploadProgress(0, 'Subiendo video...', 'Esto puede tomar unos minutos');
+    }
+
+    renderContent() {
+        this.renderFeed();
+        this.renderTV();
+    }
+
+    renderFeed() {
+        const feedVideos = this.videoLibrary.filter(video => video.format === 'feed');
+
+        if (feedVideos.length === 0) {
+            this.videoPosts.innerHTML = `
+                <div class="empty-feed">
+                    <h3>¡Bienvenido a VideoHub!</h3>
+                    <p>No hay videos aún. ¡Sube tu primer video para comenzar!</p>
+                    <button class="facebook-button" onclick="document.getElementById('uploadNavBtn').click()">
+                        <i class="fas fa-plus"></i>
+                        Subir Video
                     </button>
                 </div>
             `;
             return;
         }
-        
-        this.videoGrid.innerHTML = this.filteredVideos.map(video => `
-            <div class="video-card" data-video-id="${video.id}">
-                <div class="video-thumbnail">
-                    <div class="play-overlay">
-                        <svg viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M8 5v14l11-7z"/>
-                        </svg>
+
+        this.videoPosts.innerHTML = feedVideos.map(video => `
+            <div class="video-post" data-video-id="${video.id}">
+                <div class="post-header">
+                    <div class="post-avatar">U</div>
+                    <div class="post-info">
+                        <h4>Usuario</h4>
+                        <span>${this.formatDate(video.createdAt)}</span>
                     </div>
                 </div>
-                <div class="video-info">
-                    <div class="video-title-card">${video.title}</div>
-                    <div class="video-duration">${this.formatDate(video.createdAt)}</div>
-                    <div class="video-actions">
-                        <button class="action-btn play" onclick="window.player.playVideo('${video.id}')">
-                            Reproducir
+
+                <div class="post-video-container" onclick="this.playVideo('${video.id}')">
+                    <video class="post-video" src="${video.videoUrl}" preload="metadata"></video>
+                    <div class="feed-video-overlay">
+                        <div class="feed-play-btn">
+                            <i class="fas fa-play"></i>
+                        </div>
+                    </div>
+                    ${video.hasDualAudio ? '<div class="dual-audio-badge"><i class="fas fa-language"></i></div>' : ''}
+                </div>
+
+                <div class="post-content">
+                    <h3>${video.title}</h3>
+                    <p>${video.description}</p>
+                </div>
+
+                <div class="post-actions">
+                    <div class="action-group">
+                        <button class="action-btn" onclick="this.likeVideo('${video.id}')">
+                            <i class="far fa-heart"></i>
+                            ${video.likes || 0}
                         </button>
-                        <button class="action-btn delete" onclick="window.player.deleteVideo('${video.id}')">
-                            Eliminar
+                        <button class="action-btn">
+                            <i class="far fa-comment"></i>
+                            Comentar
                         </button>
+                        <button class="action-btn">
+                            <i class="fas fa-share"></i>
+                            Compartir
+                        </button>
+                    </div>
+                    <button class="action-btn" onclick="this.deleteVideo('${video.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        // Add click listeners
+        document.querySelectorAll('.post-video-container').forEach((container, index) => {
+            container.addEventListener('click', () => {
+                const videoId = feedVideos[index].id;
+                this.playVideo(videoId);
+            });
+        });
+    }
+
+    renderTV() {
+        const tvVideos = this.videoLibrary.filter(video => video.format === 'tv');
+
+        if (tvVideos.length === 0) {
+            this.tvGrid.innerHTML = `
+                <div class="empty-feed">
+                    <h3>Explora contenido increíble</h3>
+                    <p>Descubre videos de la comunidad en formato TV</p>
+                    <button class="facebook-button" onclick="document.getElementById('uploadNavBtn').click()">
+                        <i class="fas fa-plus"></i>
+                        Subir Video TV
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        this.tvGrid.innerHTML = tvVideos.map(video => `
+            <div class="tv-video-card" data-video-id="${video.id}">
+                <div class="tv-video-thumbnail">
+                    <video src="${video.videoUrl}" preload="metadata"></video>
+                    <div class="tv-video-overlay">
+                        <div class="tv-play-btn">
+                            <i class="fas fa-play"></i>
+                        </div>
+                    </div>
+                    ${video.hasDualAudio ? '<div class="dual-audio-badge"><i class="fas fa-language"></i></div>' : ''}
+                </div>
+                <div class="tv-video-info">
+                    <h3 class="tv-video-title">${video.title}</h3>
+                    <div class="tv-video-meta">
+                        <span>${video.views || 0} visualizaciones</span>
+                        <span>${this.formatDate(video.createdAt)}</span>
                     </div>
                 </div>
             </div>
         `).join('');
-        
-        // Add click handlers for video cards
-        this.videoGrid.querySelectorAll('.video-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                if (!e.target.closest('.video-actions')) {
-                    const videoId = card.dataset.videoId;
-                    this.playVideo(videoId);
-                }
+
+        // Add click listeners
+        document.querySelectorAll('.tv-video-card').forEach((card, index) => {
+            card.addEventListener('click', () => {
+                const videoId = tvVideos[index].id;
+                this.playVideo(videoId);
             });
         });
     }
-    
+
     playVideo(videoId) {
         const video = this.videoLibrary.find(v => v.id === videoId);
         if (!video) return;
-        
-        this.currentVideoId = videoId;
-        this.librarySection.style.display = 'none';
+
+        this.currentVideo = video;
+
+        // Show player
         this.playerSection.style.display = 'block';
-        
-        // Load video - handle both old and new storage methods
-        if (video.videoFile) {
-            // New method: create object URL from file
-            this.videoPlayer.src = URL.createObjectURL(video.videoFile);
-        } else if (video.videoData) {
-            // Old method: use stored data URL
-            this.videoPlayer.src = video.videoData;
-        } else {
-            alert('Error: No se pudo cargar el video. Por favor súbelo nuevamente.');
-            this.showLibrary();
-            return;
-        }
-        
+        this.videoPlayer.src = video.videoUrl;
         this.videoTitleDisplay.textContent = video.title;
-        
-        // Load subtitles if available
-        if (video.subtitleData) {
-            this.parseSubtitles(video.subtitleData);
+
+        // Setup dual audio if available
+        if (video.hasDualAudio) {
+            this.setupDualAudio(video);
+            this.languageSwitch.style.display = 'flex';
+        } else {
+            this.languageSwitch.style.display = 'none';
+        }
+
+        // Setup subtitles
+        if (video.subtitles) {
+            this.parseSubtitles(video.subtitles);
             this.subtitlesEnabled = true;
             this.subtitleBtn.classList.add('active');
         } else {
@@ -386,490 +460,289 @@ class NetflixVideoPlayer {
             this.subtitlesEnabled = false;
             this.subtitleBtn.classList.remove('active');
         }
-        
-        // Setup audio system when video loads
-        this.videoPlayer.addEventListener('loadeddata', () => {
-            this.setupAudioNodes();
-        }, { once: true });
-        
+
+        // Increment view count
+        video.views = (video.views || 0) + 1;
+        this.saveVideoLibrary();
+
         this.showControls();
     }
-    
-    deleteVideo(videoId) {
-        if (confirm('¿Estás seguro de que quieres eliminar este video?')) {
-            this.videoLibrary = this.videoLibrary.filter(v => v.id !== videoId);
-            this.saveVideoLibrary();
-            this.filteredVideos = this.filteredVideos.filter(v => v.id !== videoId);
-            this.renderVideoGrid();
+
+    async setupDualAudio(video) {
+        if (!this.audioContext) {
+            this.initAudioContext();
+        }
+
+        try {
+            // Load audio files
+            if (video.audioSpanish) {
+                const response = await fetch(video.audioSpanish);
+                const arrayBuffer = await response.arrayBuffer();
+                this.spanishAudio = await this.audioContext.decodeAudioData(arrayBuffer);
+            }
+
+            if (video.audioEnglish) {
+                const response = await fetch(video.audioEnglish);
+                const arrayBuffer = await response.arrayBuffer();
+                this.englishAudio = await this.audioContext.decodeAudioData(arrayBuffer);
+            }
+
+            this.setupAudioSync();
+        } catch (error) {
+            console.error('Error setting up dual audio:', error);
         }
     }
-    
-    showEditModal() {
-        if (!this.currentVideoId) return;
-        const video = this.videoLibrary.find(v => v.id === this.currentVideoId);
-        if (!video) return;
-        
-        this.editTitleInput.value = video.title;
-        this.editModal.style.display = 'flex';
+
+    initAudioContext() {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
-    
-    hideEditModal() {
-        this.editModal.style.display = 'none';
+
+    setupAudioSync() {
+        // Mute original video audio when dual audio is active
+        this.videoPlayer.muted = true;
+
+        // Play the current language audio
+        this.playCurrentLanguageAudio();
     }
-    
-    saveVideoTitle() {
-        const newTitle = this.editTitleInput.value.trim();
-        if (!newTitle) {
-            alert('El título no puede estar vacío');
-            return;
+
+    playCurrentLanguageAudio() {
+        if (this.currentAudioSource) {
+            this.currentAudioSource.stop();
         }
-        
-        const video = this.videoLibrary.find(v => v.id === this.currentVideoId);
-        if (video) {
-            video.title = newTitle;
-            this.saveVideoLibrary();
-            this.videoTitleDisplay.textContent = newTitle;
-            
-            // Update filtered videos
-            const filteredIndex = this.filteredVideos.findIndex(v => v.id === this.currentVideoId);
-            if (filteredIndex !== -1) {
-                this.filteredVideos[filteredIndex].title = newTitle;
-            }
+
+        const audioBuffer = this.currentLanguage === 'spanish' ? this.spanishAudio : this.englishAudio;
+
+        if (audioBuffer && this.audioContext) {
+            this.currentAudioSource = this.audioContext.createBufferSource();
+            this.currentAudioSource.buffer = audioBuffer;
+            this.currentAudioSource.connect(this.audioContext.destination);
+
+            // Sync with video time
+            const startTime = this.videoPlayer.currentTime;
+            this.currentAudioSource.start(0, startTime);
         }
-        
-        this.hideEditModal();
     }
-    
-    async parseSubtitles(text) {
-        this.subtitles = [];
-        const lines = text.split('\n').map(line => line.trim()).filter(line => line);
-        
-        // Variables para manejo de diferentes formatos
-        let expectingTime = false;
-        let expectingText = false;
-        let currentStart = 0;
-        let currentEnd = 0;
-        let textLines = [];
-        
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
-            
-            // Saltar líneas de metadatos VTT
-            if (line.toLowerCase().includes('webvtt') || 
-                line.toLowerCase().includes('kind:') || 
-                line.toLowerCase().includes('language:') ||
-                line.toLowerCase().includes('note:')) {
-                continue;
-            }
-            
-            // Formato VTT con timestamps embebidos: "palabra<00:00:12.160><c> texto</c>"
-            const vttTimestampMatch = line.match(/^(.+?)<(\d{2}:\d{2}:\d{2}\.\d{3})>(?:<c>(.+?)<\/c>)?/);
-            if (vttTimestampMatch) {
-                const baseText = vttTimestampMatch[1].trim();
-                const timestamp = vttTimestampMatch[2];
-                const additionalText = vttTimestampMatch[3] ? vttTimestampMatch[3].trim() : '';
-                
-                const startTime = this.parseTime(timestamp);
-                let fullText = baseText;
-                
-                if (additionalText) {
-                    fullText = baseText + ' ' + additionalText;
-                }
-                
-                // Limpiar texto de tags HTML
-                fullText = fullText.replace(/<[^>]*>/g, '').trim();
-                
-                if (fullText.length > 1) {
-                    this.subtitles.push({
-                        start: startTime,
-                        end: startTime + 3,
-                        text: fullText
-                    });
-                }
-                continue;
-            }
-            
-            // Formato SRT: número de subtítulo
-            if (/^\d+$/.test(line) && !expectingText) {
-                if (textLines.length > 0) {
-                    // Guardar subtítulo anterior
-                    this.subtitles.push({
-                        start: currentStart,
-                        end: currentEnd,
-                        text: textLines.join(' ').trim()
-                    });
-                    textLines = [];
-                }
-                expectingTime = true;
-                expectingText = false;
-                continue;
-            }
-            
-            // Formato SRT/VTT: timestamps con -->
-            if (line.includes('-->')) {
-                const timeMatch = line.match(/(\d{1,2}:\d{2}:\d{2}[.,]\d{2,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[.,]\d{2,3})/);
-                if (timeMatch) {
-                    currentStart = this.parseTime(timeMatch[1]);
-                    currentEnd = this.parseTime(timeMatch[2]);
-                    expectingTime = false;
-                    expectingText = true;
-                    continue;
-                }
-            }
-            
-            // Procesar líneas de texto
-            if (expectingText || (!line.includes('-->') && !(/^\d+$/.test(line)))) {
-                // Limpiar línea de tags HTML/VTT
-                let cleanLine = line.replace(/<[^>]*>/g, '').trim();
-                
-                // Formato simple: "MM:SS texto"
-                const simpleTimeMatch = cleanLine.match(/^(\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\s+(.+)/);
-                if (simpleTimeMatch) {
-                    const startTime = this.parseTime(simpleTimeMatch[1]);
-                    const text = simpleTimeMatch[2].trim();
-                    
-                    if (text.length > 2) {
-                        this.subtitles.push({
-                            start: startTime,
-                            end: startTime + 4,
-                            text: text
-                        });
-                    }
-                    continue;
-                }
-                
-                // Verificar si es texto válido
-                if (cleanLine.length > 2) {
-                    // Detectar idiomas (español e inglés)
-                    const isSpanishText = /[ñáéíóúü¿¡]|(?:\b(?:que|con|por|para|una|del|las|los|muy|más|año|años|día|días|como|pero|todo|este|esta|desde|hasta|cuando|donde|puede|pueden|tiene|tienen|hacer|hace|otro|otra|otros|otras|tiempo|persona|personas|vida|trabajo|casa|mundo|país|estado|ciudad|gobierno|problema|problemas|parte|partes|grupo|grupos|momento|momentos|lugar|lugares|mano|manos|ojo|ojos|cosa|cosas|vez|veces|forma|formas|agua|fuego|tierra|aire|amor|corazón|familia|amigo|amigos|hermano|hermanos|padre|madre|hijo|hijos|mujer|hombre|niño|niños|dinero|trabajo|escuela|universidad|hospital|iglesia|calle|carro|casa|comida|agua|libro|libros|música|película|películas|juego|juegos|deporte|deportes|animal|animales|árbol|árboles|flor|flores|cielo|mar|sol|luna|estrella|estrellas)\b)/i.test(cleanLine);
-                    
-                    const isEnglishText = /\b(?:the|and|for|are|but|not|you|all|can|had|her|was|one|our|out|day|get|has|him|his|how|its|may|new|now|old|see|two|way|who|boy|did|man|men|she|too|any|use|your|work|life|only|over|said|each|make|most|move|must|name|well|also|back|call|came|come|could|every|first|from|good|great|hand|have|here|home|just|know|last|left|like|look|made|many|more|much|never|only|other|people|place|right|said|same|seem|should|since|some|still|such|take|than|them|these|they|think|this|those|time|very|water|were|what|when|where|which|while|will|with|would|write|year|years|about|after|again|before|being|between|both|during|each|few|into|through|under|until|while|without|world|would|write|written|year|years|young)\b/i.test(cleanLine);
-                    
-                    if (isSpanishText || isEnglishText || cleanLine.split(' ').length >= 2) {
-                        if (expectingText && currentStart >= 0 && currentEnd > currentStart) {
-                            textLines.push(cleanLine);
-                        } else {
-                            // Crear subtítulo sin timestamp específico
-                            const autoStart = this.subtitles.length * 3.5;
-                            this.subtitles.push({
-                                start: autoStart,
-                                end: autoStart + 3.5,
-                                text: cleanLine
-                            });
-                        }
-                    }
-                }
-            }
+
+    switchLanguage(language) {
+        this.currentLanguage = language;
+
+        // Update button states
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.lang === language);
+        });
+
+        // Switch audio if dual audio is available
+        if (this.currentVideo && this.currentVideo.hasDualAudio) {
+            this.playCurrentLanguageAudio();
         }
-        
-        // Agregar último subtítulo si queda pendiente
-        if (textLines.length > 0 && currentStart >= 0 && currentEnd > currentStart) {
-            this.subtitles.push({
-                start: currentStart,
-                end: currentEnd,
-                text: textLines.join(' ').trim()
-            });
-        }
-        
-        // Eliminar duplicados y ordenar
-        const uniqueSubtitles = [];
-        const seen = new Set();
-        
-        for (let subtitle of this.subtitles) {
-            const key = `${Math.floor(subtitle.start)}-${subtitle.text.substring(0, 20)}`;
-            if (!seen.has(key) && subtitle.text.length > 1) {
-                seen.add(key);
-                uniqueSubtitles.push(subtitle);
-            }
-        }
-        
-        this.subtitles = uniqueSubtitles.sort((a, b) => a.start - b.start);
-        
-        console.log(`Loaded ${this.subtitles.length} subtitles`);
     }
-    
-    parseTime(timeStr) {
-        if (!timeStr) return 0;
-        
-        // Normalizar formato (comas a puntos)
-        timeStr = timeStr.replace(/,/g, '.').trim();
-        
-        // Remover corchetes si los hay
-        timeStr = timeStr.replace(/[\[\]]/g, '');
-        
-        const parts = timeStr.split(':');
-        
-        if (parts.length === 1) {
-            // Solo segundos: "45" o "45.123"
-            return parseFloat(parts[0]) || 0;
-        } else if (parts.length === 2) {
-            // Minutos:segundos: "01:45" o "1:45.123"
-            const minutes = parseInt(parts[0]) || 0;
-            const seconds = parseFloat(parts[1]) || 0;
-            return minutes * 60 + seconds;
-        } else if (parts.length === 3) {
-            // Horas:minutos:segundos: "01:23:45" o "1:23:45.123"
-            const hours = parseInt(parts[0]) || 0;
-            const minutes = parseInt(parts[1]) || 0;
-            const seconds = parseFloat(parts[2]) || 0;
-            return hours * 3600 + minutes * 60 + seconds;
+
+    toggleBackgroundPlay() {
+        this.backgroundPlayEnabled = !this.backgroundPlayEnabled;
+        this.backgroundPlayToggle.classList.toggle('active', this.backgroundPlayEnabled);
+
+        if (this.backgroundPlayEnabled) {
+            this.backgroundPlayToggle.innerHTML = '<i class="fas fa-pause"></i>';
+        } else {
+            this.backgroundPlayToggle.innerHTML = '<i class="fas fa-play"></i>';
         }
-        
-        return 0;
+
+        localStorage.setItem('backgroundPlayEnabled', this.backgroundPlayEnabled);
     }
-    
-    onVideoLoaded() {
-        this.durationEl.textContent = this.formatTime(this.videoPlayer.duration);
-        this.hideLoading();
-        
-        // Update duration in library
-        if (this.currentVideoId) {
-            const video = this.videoLibrary.find(v => v.id === this.currentVideoId);
-            if (video) {
-                video.duration = this.videoPlayer.duration;
-                this.saveVideoLibrary();
+
+    handleVisibilityChange() {
+        if (this.backgroundPlayEnabled && this.currentVideo) {
+            if (document.hidden) {
+                // Page is hidden, continue playing audio only
+                this.videoPlayer.pause();
+                if (this.currentAudioSource) {
+                    // Audio continues playing
+                }
+            } else {
+                // Page is visible, resume video
+                this.videoPlayer.play();
+                this.playCurrentLanguageAudio();
             }
         }
     }
-    
-    onTimeUpdate() {
-        if (!this.isDragging) {
-            const progress = (this.videoPlayer.currentTime / this.videoPlayer.duration) * 100;
-            this.progressFilled.style.width = `${progress}%`;
-            this.progressHandle.style.left = `${progress}%`;
-        }
-        
-        this.currentTimeEl.textContent = this.formatTime(this.videoPlayer.currentTime);
-        this.updateSubtitles();
-    }
-    
-    updateSubtitles() {
-        if (!this.subtitlesEnabled || this.subtitles.length === 0) {
-            this.subtitleText.style.display = 'none';
-            this.subtitleText.classList.remove('highlight');
-            return;
-        }
-        
-        const currentTime = this.videoPlayer.currentTime;
-        let activeSubtitle = null;
-        
-        // Buscar subtítulo con tolerancia de tiempo mejorada
-        for (let subtitle of this.subtitles) {
-            const tolerance = 0.3; // 300ms de tolerancia
-            if (currentTime >= (subtitle.start - tolerance) && currentTime <= (subtitle.end + tolerance)) {
-                activeSubtitle = subtitle;
-                break;
-            }
-        }
-        
-        // Si no encontramos con tolerancia, buscar el más cercano
-        if (!activeSubtitle) {
-            let closestSubtitle = null;
-            let closestDistance = Infinity;
-            
-            for (let subtitle of this.subtitles) {
-                const distance = Math.min(
-                    Math.abs(currentTime - subtitle.start),
-                    Math.abs(currentTime - subtitle.end)
-                );
-                
-                if (distance < closestDistance && distance < 1.0) { // 1 segundo de distancia máxima
-                    closestDistance = distance;
-                    closestSubtitle = subtitle;
-                }
-            }
-            
-            activeSubtitle = closestSubtitle;
-        }
-        
-        if (activeSubtitle && activeSubtitle !== this.currentSubtitle) {
-            this.subtitleText.textContent = activeSubtitle.text;
-            this.subtitleText.style.display = 'block';
-            this.subtitleText.classList.remove('highlight');
-            
-            // Añadir efecto de highlight temporal
-            setTimeout(() => {
-                if (this.subtitleText.style.display === 'block') {
-                    this.subtitleText.classList.add('highlight');
-                }
-            }, 50);
-            
-            setTimeout(() => {
-                this.subtitleText.classList.remove('highlight');
-            }, 600);
-            
-            this.currentSubtitle = activeSubtitle;
-        } else if (!activeSubtitle && this.currentSubtitle) {
-            // Mantener subtítulo visible un poco más tiempo
-            setTimeout(() => {
-                if (!activeSubtitle) {
-                    this.subtitleText.style.display = 'none';
-                    this.subtitleText.classList.remove('highlight');
-                    this.currentSubtitle = null;
-                }
-            }, 200);
+
+    checkBackgroundPlay() {
+        const saved = localStorage.getItem('backgroundPlayEnabled');
+        if (saved === 'true') {
+            this.backgroundPlayEnabled = true;
+            this.backgroundPlayToggle.classList.add('active');
+            this.backgroundPlayToggle.innerHTML = '<i class="fas fa-pause"></i>';
         }
     }
-    
+
+    closePlayer() {
+        this.playerSection.style.display = 'none';
+        this.videoPlayer.pause();
+        this.videoPlayer.src = '';
+
+        if (this.currentAudioSource) {
+            this.currentAudioSource.stop();
+            this.currentAudioSource = null;
+        }
+
+        this.currentVideo = null;
+        this.backgroundPlayToggle.style.display = 'none';
+    }
+
     togglePlayPause() {
         if (this.videoPlayer.paused) {
             this.videoPlayer.play();
+            this.playCurrentLanguageAudio();
             this.updatePlayPauseIcons(false);
+            this.backgroundPlayToggle.style.display = 'flex';
         } else {
             this.videoPlayer.pause();
+            if (this.currentAudioSource) {
+                this.currentAudioSource.stop();
+            }
             this.updatePlayPauseIcons(true);
         }
-        this.showControls();
     }
-    
+
     updatePlayPauseIcons(paused) {
         const playIcons = document.querySelectorAll('.play-icon');
         const pauseIcons = document.querySelectorAll('.pause-icon');
-        
+
         playIcons.forEach(icon => {
             icon.style.display = paused ? 'block' : 'none';
         });
-        
+
         pauseIcons.forEach(icon => {
             icon.style.display = paused ? 'none' : 'block';
         });
     }
-    
-    toggleMute() {
-        if (this.videoPlayer.muted) {
-            this.videoPlayer.muted = false;
-            this.volumeSlider.value = this.videoPlayer.volume * 100;
-            this.updateVolumeIcon(false);
-        } else {
-            this.videoPlayer.muted = true;
-            this.updateVolumeIcon(true);
+
+    onVideoLoaded() {
+        this.durationEl.textContent = this.formatTime(this.videoPlayer.duration);
+    }
+
+    onTimeUpdate() {
+        const progress = (this.videoPlayer.currentTime / this.videoPlayer.duration) * 100;
+        this.progressFilled.style.width = `${progress}%`;
+        this.currentTimeEl.textContent = this.formatTime(this.videoPlayer.currentTime);
+        this.updateSubtitles();
+    }
+
+    onVideoEnded() {
+        this.updatePlayPauseIcons(true);
+        this.backgroundPlayToggle.style.display = 'none';
+        if (this.currentAudioSource) {
+            this.currentAudioSource.stop();
         }
     }
-    
-    setVolume(value) {
-        this.videoPlayer.volume = value / 100;
-        this.videoPlayer.muted = value == 0;
-        this.updateVolumeIcon(value == 0);
+
+    updateSubtitles() {
+        if (!this.subtitlesEnabled || this.subtitles.length === 0) {
+            this.subtitleText.style.display = 'none';
+            return;
+        }
+
+        const currentTime = this.videoPlayer.currentTime;
+        const activeSubtitle = this.subtitles.find(subtitle => 
+            currentTime >= subtitle.start && currentTime <= subtitle.end
+        );
+
+        if (activeSubtitle && activeSubtitle !== this.currentSubtitle) {
+            this.subtitleText.textContent = activeSubtitle.text;
+            this.subtitleText.style.display = 'block';
+            this.currentSubtitle = activeSubtitle;
+        } else if (!activeSubtitle) {
+            this.subtitleText.style.display = 'none';
+            this.currentSubtitle = null;
+        }
     }
-    
-    updateVolumeIcon(muted) {
-        const volumeIcon = this.volumeBtn.querySelector('.volume-icon');
-        const muteIcon = this.volumeBtn.querySelector('.mute-icon');
-        
-        volumeIcon.style.display = muted ? 'none' : 'block';
-        muteIcon.style.display = muted ? 'block' : 'none';
+
+    async parseSubtitles(text) {
+        this.subtitles = [];
+        const lines = text.split('\n').filter(line => line.trim());
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            // SRT format: timestamp line
+            if (line.includes('-->')) {
+                const [start, end] = line.split('-->').map(t => this.parseTime(t.trim()));
+                const textLines = [];
+
+                // Get subtitle text
+                for (let j = i + 1; j < lines.length && lines[j].trim() && !lines[j].includes('-->'); j++) {
+                    textLines.push(lines[j].trim());
+                }
+
+                if (textLines.length > 0) {
+                    this.subtitles.push({
+                        start: start,
+                        end: end,
+                        text: textLines.join(' ')
+                    });
+                }
+            }
+        }
+
+        this.subtitles.sort((a, b) => a.start - b.start);
     }
-    
+
+    parseTime(timeStr) {
+        const parts = timeStr.replace(',', '.').split(':');
+        if (parts.length === 3) {
+            const hours = parseInt(parts[0]);
+            const minutes = parseInt(parts[1]);
+            const seconds = parseFloat(parts[2]);
+            return hours * 3600 + minutes * 60 + seconds;
+        }
+        return 0;
+    }
+
     toggleSubtitles() {
         this.subtitlesEnabled = !this.subtitlesEnabled;
         this.subtitleBtn.classList.toggle('active', this.subtitlesEnabled);
-        
+
         if (!this.subtitlesEnabled) {
             this.subtitleText.style.display = 'none';
         }
     }
-    
+
+    toggleMute() {
+        if (this.currentVideo && this.currentVideo.hasDualAudio) {
+            // For dual audio, just toggle the audio source volume
+            return;
+        }
+
+        this.videoPlayer.muted = !this.videoPlayer.muted;
+        this.volumeBtn.innerHTML = this.videoPlayer.muted ? 
+            '<i class="fas fa-volume-mute"></i>' : 
+            '<i class="fas fa-volume-up"></i>';
+    }
+
     toggleFullscreen() {
-        try {
-            const isFullscreen = document.fullscreenElement || 
-                                document.webkitFullscreenElement || 
-                                document.mozFullScreenElement ||
-                                document.msFullscreenElement;
-            
-            if (!isFullscreen) {
-                // Enter fullscreen - usar simulación CSS en lugar de API nativa
-                this.simulateFullscreen(true);
-            } else {
-                // Exit fullscreen
-                if (document.exitFullscreen && typeof document.exitFullscreen === 'function') {
-                    document.exitFullscreen().catch(() => this.simulateFullscreen(false));
-                } else if (document.webkitExitFullscreen && typeof document.webkitExitFullscreen === 'function') {
-                    document.webkitExitFullscreen();
-                } else if (document.webkitCancelFullScreen && typeof document.webkitCancelFullScreen === 'function') {
-                    document.webkitCancelFullScreen();
-                } else if (document.mozCancelFullScreen && typeof document.mozCancelFullScreen === 'function') {
-                    document.mozCancelFullScreen();
-                } else if (document.msExitFullscreen && typeof document.msExitFullscreen === 'function') {
-                    document.msExitFullscreen();
-                } else {
-                    this.simulateFullscreen(false);
-                }
-            }
-        } catch (err) {
-            console.log('Using CSS fullscreen simulation');
-            this.simulateFullscreen(!this.playerSection.classList.contains('simulated-fullscreen'));
-        }
-    }
-    
-    simulateFullscreen(enable) {
-        if (enable) {
-            this.playerSection.classList.add('simulated-fullscreen');
-            document.body.style.overflow = 'hidden';
+        if (!document.fullscreenElement) {
+            this.playerSection.requestFullscreen().catch(err => {
+                console.log('Fullscreen error:', err);
+            });
         } else {
-            this.playerSection.classList.remove('simulated-fullscreen');
-            document.body.style.overflow = 'auto';
-        }
-        this.onFullscreenChange();
-    }
-    
-    onFullscreenChange() {
-        const expandIcon = this.fullscreenBtn.querySelector('.expand-icon');
-        const compressIcon = this.fullscreenBtn.querySelector('.compress-icon');
-        
-        const isFullscreen = document.fullscreenElement || 
-                            document.webkitFullscreenElement || 
-                            document.mozFullScreenElement ||
-                            document.msFullscreenElement ||
-                            this.playerSection.classList.contains('simulated-fullscreen');
-        
-        if (isFullscreen) {
-            expandIcon.style.display = 'none';
-            compressIcon.style.display = 'block';
-        } else {
-            expandIcon.style.display = 'block';
-            compressIcon.style.display = 'none';
+            document.exitFullscreen();
         }
     }
-    
+
     seekTo(e) {
         const rect = this.progressBar.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
         const progress = clickX / rect.width;
-        const newTime = progress * this.videoPlayer.duration;
-        
-        this.videoPlayer.currentTime = newTime;
+        this.videoPlayer.currentTime = progress * this.videoPlayer.duration;
+
+        // Sync audio if dual audio is active
+        if (this.currentVideo && this.currentVideo.hasDualAudio) {
+            this.playCurrentLanguageAudio();
+        }
     }
-    
-    startDrag(e) {
-        this.isDragging = true;
-        this.drag(e);
-    }
-    
-    drag(e) {
-        if (!this.isDragging) return;
-        
-        const rect = this.progressBar.getBoundingClientRect();
-        const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-        const progress = clickX / rect.width;
-        
-        this.progressFilled.style.width = `${progress * 100}%`;
-        this.progressHandle.style.left = `${progress * 100}%`;
-    }
-    
-    endDrag() {
-        if (!this.isDragging) return;
-        
-        const progress = parseFloat(this.progressFilled.style.width) / 100;
-        const newTime = progress * this.videoPlayer.duration;
-        this.videoPlayer.currentTime = newTime;
-        
-        this.isDragging = false;
-    }
-    
+
     showControls() {
         this.controlsOverlay.classList.add('visible');
-        this.controlsOverlay.classList.remove('hidden');
-        
         clearTimeout(this.controlsTimeout);
         this.controlsTimeout = setTimeout(() => {
             if (!this.videoPlayer.paused) {
@@ -877,43 +750,14 @@ class NetflixVideoPlayer {
             }
         }, 3000);
     }
-    
+
     hideControls() {
-        if (!this.controlsOverlay.matches(':hover')) {
-            this.controlsOverlay.classList.remove('visible');
-            this.controlsOverlay.classList.add('hidden');
-        }
+        this.controlsOverlay.classList.remove('visible');
     }
-    
-    showLoading() {
-        this.loadingSpinner.style.display = 'block';
-    }
-    
-    hideLoading() {
-        this.loadingSpinner.style.display = 'none';
-    }
-    
-    goBack() {
-        this.videoPlayer.pause();
-        this.playerSection.style.display = 'none';
-        this.showLibrary();
-        
-        // Reset player state
-        this.videoPlayer.src = '';
-        this.subtitles = [];
-        this.currentSubtitle = null;
-        this.currentVideoId = null;
-        this.subtitleText.style.display = 'none';
-    }
-    
-    onVideoEnded() {
-        this.updatePlayPauseIcons(true);
-        this.showControls();
-    }
-    
+
     handleKeyboard(e) {
         if (this.playerSection.style.display === 'none') return;
-        
+
         switch (e.code) {
             case 'Space':
                 e.preventDefault();
@@ -921,21 +765,11 @@ class NetflixVideoPlayer {
                 break;
             case 'ArrowLeft':
                 e.preventDefault();
-                this.videoPlayer.currentTime = Math.max(0, this.videoPlayer.currentTime - 10);
+                this.videoPlayer.currentTime -= 10;
                 break;
             case 'ArrowRight':
                 e.preventDefault();
-                this.videoPlayer.currentTime = Math.min(this.videoPlayer.duration, this.videoPlayer.currentTime + 10);
-                break;
-            case 'ArrowUp':
-                e.preventDefault();
-                this.setVolume(Math.min(100, this.videoPlayer.volume * 100 + 10));
-                this.volumeSlider.value = this.videoPlayer.volume * 100;
-                break;
-            case 'ArrowDown':
-                e.preventDefault();
-                this.setVolume(Math.max(0, this.videoPlayer.volume * 100 - 10));
-                this.volumeSlider.value = this.videoPlayer.volume * 100;
+                this.videoPlayer.currentTime += 10;
                 break;
             case 'KeyF':
                 e.preventDefault();
@@ -945,355 +779,89 @@ class NetflixVideoPlayer {
                 e.preventDefault();
                 this.toggleSubtitles();
                 break;
-            case 'KeyM':
-                e.preventDefault();
-                this.toggleMute();
-                break;
             case 'Escape':
-                if (document.fullscreenElement) {
-                    this.toggleFullscreen();
-                }
+                this.closePlayer();
                 break;
         }
-        
-        this.showControls();
     }
-    
-    handleOrientationChange() {
-        this.videoPlayer.style.width = '100%';
-        this.videoPlayer.style.height = '100%';
+
+    filterTVContent(filter) {
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.filter === filter);
+        });
+
+        // Apply filter logic here
+        this.renderTV();
     }
-    
+
+    deleteVideo(videoId) {
+        if (confirm('¿Estás seguro de que quieres eliminar este video?')) {
+            this.videoLibrary = this.videoLibrary.filter(v => v.id !== videoId);
+            this.saveVideoLibrary();
+            this.renderContent();
+        }
+    }
+
+    likeVideo(videoId) {
+        const video = this.videoLibrary.find(v => v.id === videoId);
+        if (video) {
+            video.likes = (video.likes || 0) + 1;
+            this.saveVideoLibrary();
+            this.renderContent();
+        }
+    }
+
+    // Utility functions
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+
     formatTime(seconds) {
         if (isNaN(seconds)) return '0:00';
-        
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
+        const minutes = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
-        
-        if (hours > 0) {
-            return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        } else {
-            return `${minutes}:${secs.toString().padStart(2, '0')}`;
-        }
+        return `${minutes}:${secs.toString().padStart(2, '0')}`;
     }
-    
+
     formatDate(dateStr) {
         const date = new Date(dateStr);
-        return date.toLocaleDateString('es-ES', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
+        const now = new Date();
+        const diff = now - date;
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+
+        if (hours < 1) return 'Hace unos minutos';
+        if (hours < 24) return `Hace ${hours}h`;
+        if (hours < 48) return 'Ayer';
+        return date.toLocaleDateString('es-ES');
     }
-    
-    // Audio System Methods
-    async initializeAudioSystem() {
+
+    // Storage functions
+    loadVideoLibrary() {
         try {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            this.setupAudioEventListeners();
+            const stored = localStorage.getItem('videoHub_library');
+            return stored ? JSON.parse(stored) : [];
         } catch (error) {
-            console.log('Web Audio API not supported');
+            console.error('Error loading video library:', error);
+            return [];
         }
     }
-    
-    setupAudioEventListeners() {
-        // Equalizer sliders
-        document.querySelectorAll('.eq-slider').forEach(slider => {
-            slider.addEventListener('input', (e) => this.updateEqualizer(e));
-        });
-        
-        // Effect controls
-        document.getElementById('bassBoost').addEventListener('input', (e) => this.updateBassBoost(e.target.value));
-        document.getElementById('reverbEffect').addEventListener('input', (e) => this.updateReverb(e.target.value));
-        document.getElementById('compressorEffect').addEventListener('input', (e) => this.updateCompressor(e.target.value));
-        
-        // Preset buttons
-        document.querySelectorAll('.preset-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => this.applyPreset(e.target.dataset.preset));
-        });
-        
-        // Visualizer buttons
-        document.querySelectorAll('.visualizer-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => this.changeVisualizerType(e.target.dataset.type));
-        });
-    }
-    
-    async setupAudioNodes() {
-        if (!this.audioContext || !this.videoPlayer) return;
-        
+
+    saveVideoLibrary() {
         try {
-            if (this.audioSource) {
-                this.audioSource.disconnect();
-            }
-            
-            this.audioSource = this.audioContext.createMediaElementSource(this.videoPlayer);
-            this.analyser = this.audioContext.createAnalyser();
-            this.gainNode = this.audioContext.createGain();
-            
-            // Create equalizer bands
-            this.equalizer = [];
-            const frequencies = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
-            
-            frequencies.forEach(freq => {
-                const filter = this.audioContext.createBiquadFilter();
-                filter.type = 'peaking';
-                filter.frequency.value = freq;
-                filter.Q.value = 1;
-                filter.gain.value = 0;
-                this.equalizer.push(filter);
-            });
-            
-            // Create effects
-            this.bassBoostFilter = this.audioContext.createBiquadFilter();
-            this.bassBoostFilter.type = 'lowshelf';
-            this.bassBoostFilter.frequency.value = 200;
-            this.bassBoostFilter.gain.value = 0;
-            
-            this.compressorNode = this.audioContext.createDynamicsCompressor();
-            this.compressorNode.threshold.value = -24;
-            this.compressorNode.knee.value = 30;
-            this.compressorNode.ratio.value = 12;
-            this.compressorNode.attack.value = 0.003;
-            this.compressorNode.release.value = 0.25;
-            
-            // Connect nodes
-            let currentNode = this.audioSource;
-            
-            // Connect equalizer
-            this.equalizer.forEach(filter => {
-                currentNode.connect(filter);
-                currentNode = filter;
-            });
-            
-            // Connect effects
-            currentNode.connect(this.bassBoostFilter);
-            this.bassBoostFilter.connect(this.compressorNode);
-            this.compressorNode.connect(this.gainNode);
-            this.gainNode.connect(this.analyser);
-            this.analyser.connect(this.audioContext.destination);
-            
-            // Setup analyzer
-            this.analyser.fftSize = 256;
-            this.startVisualizer();
-            
+            // Only save metadata, not the actual file objects
+            const metadata = this.videoLibrary.map(video => ({
+                ...video,
+                videoFile: undefined // Remove file reference to avoid storage issues
+            }));
+            localStorage.setItem('videoHub_library', JSON.stringify(metadata));
         } catch (error) {
-            console.error('Error setting up audio nodes:', error);
+            console.error('Error saving video library:', error);
+            alert('Error al guardar. Tu almacenamiento local puede estar lleno.');
         }
-    }
-    
-    updateEqualizer(event) {
-        const slider = event.target;
-        const freq = parseInt(slider.dataset.freq);
-        const gain = parseFloat(slider.value);
-        const valueSpan = slider.parentElement.querySelector('.eq-value');
-        
-        valueSpan.textContent = `${gain > 0 ? '+' : ''}${gain}dB`;
-        
-        if (this.equalizer) {
-            const filter = this.equalizer.find(f => f.frequency.value === freq);
-            if (filter) {
-                filter.gain.value = gain;
-            }
-        }
-    }
-    
-    updateBassBoost(value) {
-        const valueSpan = document.querySelector('#bassBoost').parentElement.querySelector('.effect-value');
-        valueSpan.textContent = `${value}%`;
-        
-        if (this.bassBoostFilter) {
-            this.bassBoostFilter.gain.value = (value / 100) * 12;
-        }
-    }
-    
-    updateReverb(value) {
-        const valueSpan = document.querySelector('#reverbEffect').parentElement.querySelector('.effect-value');
-        valueSpan.textContent = `${value}%`;
-        
-        // Reverb simulation with delay
-        if (this.gainNode) {
-            const reverbAmount = value / 100;
-            // This is a simplified reverb effect
-        }
-    }
-    
-    updateCompressor(value) {
-        const valueSpan = document.querySelector('#compressorEffect').parentElement.querySelector('.effect-value');
-        valueSpan.textContent = `${value}%`;
-        
-        if (this.compressorNode) {
-            const ratio = 1 + (value / 100) * 19;
-            this.compressorNode.ratio.value = ratio;
-        }
-    }
-    
-    applyPreset(presetName) {
-        const presets = {
-            flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            rock: [3, 2, -1, -2, -1, 2, 4, 5, 5, 5],
-            pop: [-1, 2, 4, 4, 1, -1, -2, -2, -1, -1],
-            jazz: [3, 2, 1, 2, -1, -1, 0, 1, 2, 3],
-            classical: [3, 2, -1, -2, -1, 2, 3, 4, 4, 5],
-            electronic: [4, 3, 1, 0, -1, 1, 2, 4, 5, 5]
-        };
-        
-        const values = presets[presetName] || presets.flat;
-        const sliders = document.querySelectorAll('.eq-slider');
-        
-        sliders.forEach((slider, index) => {
-            if (values[index] !== undefined) {
-                slider.value = values[index];
-                const event = { target: slider };
-                this.updateEqualizer(event);
-            }
-        });
-        
-        // Update preset button styles
-        document.querySelectorAll('.preset-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.preset === presetName);
-        });
-    }
-    
-    changeVisualizerType(type) {
-        this.visualizerType = type;
-        
-        document.querySelectorAll('.visualizer-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.type === type);
-        });
-    }
-    
-    startVisualizer() {
-        if (!this.analyser || !this.audioVisualizer) return;
-        
-        const canvas = this.audioVisualizer;
-        const ctx = canvas.getContext('2d');
-        const bufferLength = this.analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        
-        const draw = () => {
-            this.animationId = requestAnimationFrame(draw);
-            
-            this.analyser.getByteFrequencyData(dataArray);
-            
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            const barWidth = canvas.width / bufferLength * 2.5;
-            let x = 0;
-            
-            switch (this.visualizerType) {
-                case 'bars':
-                    for (let i = 0; i < bufferLength; i++) {
-                        const barHeight = (dataArray[i] / 255) * canvas.height;
-                        
-                        const gradient = ctx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height);
-                        gradient.addColorStop(0, '#fd5949');
-                        gradient.addColorStop(0.5, '#d6249f');
-                        gradient.addColorStop(1, '#285AEB');
-                        
-                        ctx.fillStyle = gradient;
-                        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-                        
-                        x += barWidth + 1;
-                    }
-                    break;
-                    
-                case 'wave':
-                    ctx.lineWidth = 2;
-                    ctx.strokeStyle = '#fd5949';
-                    ctx.beginPath();
-                    
-                    const sliceWidth = canvas.width / bufferLength;
-                    x = 0;
-                    
-                    for (let i = 0; i < bufferLength; i++) {
-                        const v = dataArray[i] / 128.0;
-                        const y = v * canvas.height / 2;
-                        
-                        if (i === 0) {
-                            ctx.moveTo(x, y);
-                        } else {
-                            ctx.lineTo(x, y);
-                        }
-                        
-                        x += sliceWidth;
-                    }
-                    
-                    ctx.stroke();
-                    break;
-                    
-                case 'circle':
-                    const centerX = canvas.width / 2;
-                    const centerY = canvas.height / 2;
-                    const radius = Math.min(centerX, centerY) - 10;
-                    
-                    ctx.strokeStyle = '#fd5949';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-                    ctx.stroke();
-                    
-                    for (let i = 0; i < bufferLength; i++) {
-                        const angle = (i / bufferLength) * 2 * Math.PI;
-                        const amplitude = (dataArray[i] / 255) * 20;
-                        
-                        const x1 = centerX + Math.cos(angle) * radius;
-                        const y1 = centerY + Math.sin(angle) * radius;
-                        const x2 = centerX + Math.cos(angle) * (radius + amplitude);
-                        const y2 = centerY + Math.sin(angle) * (radius + amplitude);
-                        
-                        ctx.beginPath();
-                        ctx.moveTo(x1, y1);
-                        ctx.lineTo(x2, y2);
-                        ctx.stroke();
-                    }
-                    break;
-            }
-        };
-        
-        draw();
-    }
-    
-    showAudioModal() {
-        this.audioModal.style.display = 'flex';
-        
-        // Initialize audio context on user interaction
-        if (this.audioContext && this.audioContext.state === 'suspended') {
-            this.audioContext.resume();
-        }
-    }
-    
-    hideAudioModal() {
-        this.audioModal.style.display = 'none';
-    }
-    
-    resetAudioSettings() {
-        // Reset equalizer
-        document.querySelectorAll('.eq-slider').forEach(slider => {
-            slider.value = 0;
-            const event = { target: slider };
-            this.updateEqualizer(event);
-        });
-        
-        // Reset effects
-        document.getElementById('bassBoost').value = 0;
-        document.getElementById('reverbEffect').value = 0;
-        document.getElementById('compressorEffect').value = 0;
-        
-        this.updateBassBoost(0);
-        this.updateReverb(0);
-        this.updateCompressor(0);
-        
-        // Reset presets
-        document.querySelectorAll('.preset-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        document.querySelector('[data-preset="flat"]').classList.add('active');
     }
 }
 
-// Initialize the player when the page loads
+// Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
-    window.player = new NetflixVideoPlayer();
+    window.videoHub = new VideoHubPlayer();
 });
