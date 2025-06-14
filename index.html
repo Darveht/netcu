@@ -142,6 +142,13 @@
                                 </svg>
                             </button>
                             
+                            <button class="control-btn" id="audioBtn" title="Configuración de Audio">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                                </svg>
+                            </button>
+                            
                             <button class="control-btn" id="fullscreenBtn">
                                 <svg class="expand-icon" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
@@ -164,6 +171,117 @@
                 <div class="modal-actions">
                     <button id="saveTitle" class="netflix-button">Guardar</button>
                     <button id="cancelEdit" class="cancel-button">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Settings Modal -->
+        <div class="modal-overlay" id="audioModal" style="display: none;">
+            <div class="modal audio-modal">
+                <h3>⚡ Configuración de Audio</h3>
+                <div class="audio-settings">
+                    <div class="setting-group">
+                        <label>🎵 Ecualizador</label>
+                        <div class="equalizer">
+                            <div class="eq-band">
+                                <span>60Hz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="60">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>170Hz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="170">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>310Hz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="310">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>600Hz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="600">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>1kHz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="1000">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>3kHz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="3000">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>6kHz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="6000">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>12kHz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="12000">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>14kHz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="14000">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                            <div class="eq-band">
+                                <span>16kHz</span>
+                                <input type="range" min="-12" max="12" value="0" class="eq-slider" data-freq="16000">
+                                <span class="eq-value">0dB</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label>🎚️ Efectos de Audio</label>
+                        <div class="audio-effects">
+                            <div class="effect-control">
+                                <span>Bass Boost</span>
+                                <input type="range" min="0" max="100" value="0" id="bassBoost">
+                                <span class="effect-value">0%</span>
+                            </div>
+                            <div class="effect-control">
+                                <span>Reverb</span>
+                                <input type="range" min="0" max="100" value="0" id="reverbEffect">
+                                <span class="effect-value">0%</span>
+                            </div>
+                            <div class="effect-control">
+                                <span>Compressor</span>
+                                <input type="range" min="0" max="100" value="0" id="compressorEffect">
+                                <span class="effect-value">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label>🎭 Presets</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" data-preset="flat">Plano</button>
+                            <button class="preset-btn" data-preset="rock">Rock</button>
+                            <button class="preset-btn" data-preset="pop">Pop</button>
+                            <button class="preset-btn" data-preset="jazz">Jazz</button>
+                            <button class="preset-btn" data-preset="classical">Clásica</button>
+                            <button class="preset-btn" data-preset="electronic">Electrónica</button>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>📊 Visualizador de Audio</label>
+                        <div class="visualizer-options">
+                            <button class="visualizer-btn active" data-type="bars">Barras</button>
+                            <button class="visualizer-btn" data-type="wave">Ondas</button>
+                            <button class="visualizer-btn" data-type="circle">Circular</button>
+                        </div>
+                        <canvas id="audioVisualizer" width="400" height="100"></canvas>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="resetAudio" class="cancel-button">Reiniciar</button>
+                    <button id="closeAudio" class="netflix-button">Cerrar</button>
                 </div>
             </div>
         </div>
